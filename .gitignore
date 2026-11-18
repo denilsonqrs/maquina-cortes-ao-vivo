@@ -1,0 +1,21 @@
+# dependências e binários
+node_modules/
+whisper.cpp/
+*.bin
+
+# seus dados (não sobem pro GitHub)
+config.json
+logo.png
+cameras.json
+kick-salas.json
+sfx/
+
+# gravações e arquivos de trabalho
+ao-vivo/
+tmp/
+*.ts
+*.wav
+*.mp4
+*.log
+.DS_Store
+Thumbs.db

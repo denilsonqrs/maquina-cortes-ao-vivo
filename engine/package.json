@@ -1,0 +1,21 @@
+{
+  "name": "maquina-cortes-ao-vivo",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Cortes de lives em tempo real: grava, você marca o momento e ele monta o vertical com legenda",
+  "scripts": {
+    "studio": "remotion studio src/index.js",
+    "instalar-whisper": "node scripts/_install-whisper.mjs",
+    "ao-vivo": "node scripts/ao-vivo.mjs",
+    "editar": "node scripts/editar.mjs"
+  },
+  "dependencies": {
+    "@remotion/cli": "4.0.543",
+    "@remotion/google-fonts": "4.0.543",
+    "@remotion/install-whisper-cpp": "4.0.543",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "remotion": "4.0.543",
+    "ws": "^8.18.0"
+  }
+}
