@@ -22,8 +22,8 @@
 //   --teste arquivo     simula uma live com um vídeo local (para testar hoje)
 //
 // Enquanto roda, no terminal:
-//   ENTER          corta os últimos 60 s na hora (você viu algo e quer na mão)
-//   90 + ENTER     corta os últimos 90 s
+//   ENTER          salva 40 s antes + 40 s depois (pega o desfecho). --antes N / --depois N mudam isso
+//   90 + ENTER     salva 90 s antes (+ os segundos de depois)
 //   q + ENTER      encerra
 import {spawn, spawnSync} from 'node:child_process';
 import fs from 'node:fs';
@@ -90,7 +90,9 @@ const SEG = 10; // segundos por pedaço gravado (menor = menos atraso)
 const MAX_DUR = Number(opt.duracao || 60);
 const KEEP = Number(opt['guardar-min'] || 40) * 60;
 const COOLDOWN = 60; // segundos mínimos entre dois cortes automáticos
-const POST = 20; // segundos que espera depois do pico (para pegar a reação)
+const POST = Number(opt['depois-auto'] ?? 30); // segundos que espera depois do pico (para pegar a reação/desfecho)
+const ANTES = Number(opt.antes ?? 40); // ENTER: segundos ANTES do momento
+const DEPOIS = Number(opt.depois ?? 40); // ENTER: segundos que continua gravando DEPOIS, para pegar o desfecho
 // sensibilidade: com chat lido (Twitch ou Kick conectado) 3; sem chat (YouTube, Kick bloqueada) 2,3
 const limiar = () => (opt.limiar ? Number(opt.limiar) : twitch || kickOk ? 3 : 2.3);
 const CLAUDE_MODEL = opt['modelo-claude'] || 'sonnet';
@@ -177,6 +179,8 @@ if (!opt['sem-claude']) {
 // ---------------- estado ----------------
 const segments = []; // {file, abs0, dur, wallStart, wallEnd}
 let total = 0; // segundos gravados (linha do tempo contínua)
+let doneUntil = 0; // até onde a análise (volume/fala) já chegou
+let scanFrom = 0; // de onde a próxima detecção começa a olhar
 const words = []; // {text, t0, t1} em segundos absolutos
 const loud = new Map(); // segundo absoluto -> loudness máxima (LUFS momentânea)
 const chat = []; // {wall, text}
@@ -458,6 +462,7 @@ async function pumpAnalysis() {
         try {
           await analyze(seg);
         } catch {}
+        doneUntil = Math.max(doneUntil, seg.abs0 + seg.dur);
         fs.rmSync(seg.file.replace(/\.ts$/, '.wav'), {force: true});
       }
       if (!pumpAnalysis.warned || Date.now() - pumpAnalysis.warned > 120000) {
@@ -473,6 +478,7 @@ async function pumpAnalysis() {
       } catch (e) {
         log('erro analisando pedaço:', e.message);
       }
+      doneUntil = Math.max(doneUntil, seg.abs0 + seg.dur);
     }
     if (AUTO) {
       try {
@@ -487,7 +493,7 @@ async function pumpAnalysis() {
       detect();
     } else if (!pumpAnalysis.lastLog || Date.now() - pumpAnalysis.lastLog > 60000) {
       pumpAnalysis.lastLog = Date.now();
-      log(`gravando… ${hms(total)} | ENTER = corta os últimos 60 s`);
+      log(`gravando… ${hms(total)} | ENTER = salva ${ANTES} s antes + ${DEPOIS} s depois`);
     }
     cleanup();
   }
@@ -680,29 +686,33 @@ function windowStats(t0, t1) {
 }
 
 function detect() {
-  if (pending && total >= pending.peak + POST) {
+  // olha só o trecho JÁ analisado (volume + fala). Antes olhava o fim da gravação, que ainda não tinha
+  // sido analisado — sem chat (Kick), o pico ficava sempre 0.0.
+  const T = doneUntil;
+  if (pending && T >= pending.peak + POST) {
     const p = pending;
     pending = null;
     decide(p);
   }
-  if (pending || total < 60) return;
-  // linha de base: últimos 5 min (menos os 30 s mais recentes)
-  const baseFrom = Math.max(0, total - 300);
+  if (pending || T < 60) return;
+  const from = Math.max(scanFrom, T - 90, 0);
+  // linha de base: 5 min antes do trecho novo
   const base = [];
-  for (let t = baseFrom; t + 5 <= total - 30; t += 5) base.push(windowStats(t, t + 5));
-  if (base.length < 6) return;
-  const lm = mean(base.map((b) => b.loud));
-  const ls = std(base.map((b) => b.loud));
-  const cm = mean(base.map((b) => b.chat));
-  const cs = std(base.map((b) => b.chat));
+  for (let t = Math.max(0, from - 300); t + 5 <= from; t += 5) base.push(windowStats(t, t + 5));
+  if (base.length < 6) {
+    if (from <= 35) return; // começo da live: espera juntar base
+  }
+  const lm = base.length ? mean(base.map((b) => b.loud)) : -30;
+  const ls = base.length ? std(base.map((b) => b.loud)) : 4;
+  const cm = base.length ? mean(base.map((b) => b.chat)) : 0;
+  const cs = base.length ? std(base.map((b) => b.chat)) : 1;
   let best = null;
-  for (let t = Math.max(total - SEG - 5, 0); t + 5 <= total; t += 1) {
+  for (let t = from; t + 5 <= T; t += 1) {
     const w = windowStats(t, t + 5);
     const zl = Math.max(0, (w.loud - lm) / (ls + 1.5));
     const zc = twitch || kickOk ? Math.max(0, (w.chat - cm) / (cs + 1)) : 0;
     const score = zc + 0.8 * zl + 1.0 * Math.min(w.kw, 3) + 0.15 * Math.min(w.chatKw, 10);
     if (!best || score > best.score) {
-      // segundo mais alto dentro da janela = momento do pico
       let ps = t + 2.5;
       let pv = -71;
       for (let k = t; k < t + 5; k++) if ((loud.get(k) ?? -70) > pv) {
@@ -712,6 +722,8 @@ function detect() {
       best = {t, score, peakSec: zl > 0.5 ? ps : t + 2.5, ...w};
     }
   }
+  if (!best) return;
+  scanFrom = Math.max(from, T - 5);
   lastScore = best.score;
   if (best.score >= limiar() && best.t - lastClipAt > COOLDOWN) {
     pending = {peak: best.peakSec, score: best.score, info: best};
@@ -1184,6 +1196,7 @@ function cleanup() {
 }
 
 // ---------------- corte manual pelo teclado ----------------
+let marcados = 0;
 const rl = readline.createInterface({input: process.stdin});
 rl.on('line', (line) => {
   const s = line.trim().toLowerCase();
@@ -1191,7 +1204,7 @@ rl.on('line', (line) => {
     stopping = true;
     log('Encerrando… (os cortes na fila terminam antes)');
     const wait = setInterval(() => {
-      if (!clipping && !clipQueue.length) {
+      if (!clipping && !clipQueue.length && !marcados) {
         clearInterval(wait);
         process.exit(0);
       }
@@ -1203,12 +1216,22 @@ rl.on('line', (line) => {
     if (s.startsWith('--')) log('   Opções como --auto vão no comando de abrir o programa, não aqui dentro.');
     return;
   }
-  const secs = Math.min(Number(s) || 60, 180);
+  const secs = Math.min(Number(s) || ANTES, 180);
   if (total < 5) return log('Ainda não gravou nada.');
-  const c = {start: Math.max(0, total - secs), end: total, id: `manual-${hms(total).replace(/:/g, '')}`, titulo: '', legenda: '', motivo: 'corte manual'};
-  log(`✂️  Cortando os últimos ${secs} s (até ${hms(total)})…`);
-  clipQueue.push(c);
-  pumpClips();
+  // a gravação fica uns 10 s atrás do que você vê: marca agora e continua gravando DEPOIS s para pegar o desfecho
+  const t0 = total;
+  marcados++;
+  const c = {start: Math.max(0, t0 - secs), end: t0 + DEPOIS, id: `manual-${hms(t0).replace(/:/g, '')}`, titulo: '', legenda: '', motivo: 'corte manual'};
+  log(`✂️  Marcado! ${secs} s antes + ${DEPOIS} s depois — salvo o bruto daqui a ~${DEPOIS + 10} s (pode apertar ENTER de novo em outro momento).`);
+  const espera = setInterval(() => {
+    if (total >= c.end + 10 || stopping) {
+      clearInterval(espera);
+      marcados--;
+      c.end = Math.min(c.end, total);
+      clipQueue.push(c);
+      pumpClips();
+    }
+  }, 1000);
 });
 
 // ---------------- início ----------------
@@ -1217,7 +1240,7 @@ log(`Cortes vão para: ${OUT}`);
 log(`Transcrição ao vivo: ${transcriptFile}`);
 if (!AUTO) log('MODO MANUAL: só corta quando você apertar ENTER (use --auto para a detecção automática).');
 else log(`Detecção: ${twitch ? 'chat da Twitch + ' : kick ? 'chat da Kick + ' : ''}volume + fala | limiar ${limiar()} | Claude Code: ${claudeOk ? 'sim (' + CLAUDE_MODEL + ')' : 'não'}`);
-log('ENTER = corta os últimos 60 s | "90" + ENTER = últimos 90 s | q + ENTER = sair');
+log(`ENTER = salva ${ANTES} s antes + ${DEPOIS} s depois | "90" + ENTER = 90 s antes | q + ENTER = sair`);
 process.on('SIGINT', () => process.exit(0));
 await prepLiveModel();
 startChat();

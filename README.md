@@ -9,7 +9,7 @@ Criada para o lançamento do GTA VI, quando quem posta o corte primeiro leva a e
 **Durante a live (`ao-vivo.bat`)**
 - Grava Twitch, Kick e YouTube em tempo real (pedaços de 10 s, só os últimos 40 min ficam em disco).
 - Pula os anúncios da Twitch (com streamlink) e descarta trechos corrompidos.
-- **ENTER** salva os últimos 60 s como clipe bruto em ~20 s. Também dá para digitar os segundos (`90` + ENTER).
+- **ENTER** marca o momento e salva 40 s antes + 40 s depois como clipe bruto, para pegar o desfecho. Também dá para digitar os segundos de antes (`90` + ENTER).
 - Espera sozinha se o streamer ainda não estiver ao vivo e começa a gravar quando a live abrir.
 - Modo opcional `--auto`: detecta picos sozinha (chat da Twitch/Kick explodindo, grito, palavrão, "olha isso") e usa o Claude Code para decidir se vale o corte.
 
@@ -47,7 +47,7 @@ Depois edite o `config.json` (criado a partir do `config.exemplo.json`) com o se
 ```powershell
 & "$env:USERPROFILE\.maquina-cortes-gta\ao-vivo.bat" https://www.twitch.tv/CANAL
 ```
-- `ENTER` corta os últimos 60 s, `90` + `ENTER` corta os últimos 90 s, `q` + `ENTER` sai.
+- `ENTER` salva 40 s antes + 40 s depois do momento, `90` + `ENTER` salva 90 s antes, `q` + `ENTER` sai. Mude com `--antes N` e `--depois N`.
 - Os brutos vão para `Vídeos\cortes-ao-vivo\<canal>\brutos`.
 - Link do YouTube: coloque entre aspas e dê um nome, por exemplo `"https://www.youtube.com/watch?v=..." --nome canal`.
 
@@ -64,7 +64,7 @@ Escolha o número do clipe, o começo (ex.: `0:12`) e o fim (ex.: `0:41`). O ví
 | ao-vivo | `--auto` | detecção automática de picos (pesa mais: transcreve a live inteira) |
 | ao-vivo | `--crop x,y,w,h` | define na mão onde fica a câmera do streamer |
 | ao-vivo | `--kick-sala N` | número da sala de chat da Kick, se a consulta automática for bloqueada |
-| editar | `--gancho "TEXTO"` | escreve você mesmo o gancho |
+| editar | `--gancho "TEXTO"` `--subgancho "TEXTO"` | escreve você mesmo o título e o subtítulo da tela |
 | editar | `--corrigir "Errado=Certo"` | corrige uma palavra que o whisper errou |
 | editar | `--sem-gancho` `--sem-cortar-pausas` `--sem-zoom` | desliga cada edição |
 | editar | `--manter-jogo` | mantém as falas do jogo na legenda |
@@ -87,3 +87,7 @@ Escolha o número do clipe, o começo (ex.: `0:12`) e o fim (ex.: `0:41`). O ví
 ## Créditos
 
 Desenvolvido por [denilsonqrs](https://github.com/denilsonqrs), com a ajuda do [Claude](https://claude.ai) (Anthropic).
+
+## Fontes
+
+A legenda e o título usam a fonte [Montserrat](https://github.com/JulietaUla/Montserrat) (SIL Open Font License, em `engine/fonts/OFL.txt`).
