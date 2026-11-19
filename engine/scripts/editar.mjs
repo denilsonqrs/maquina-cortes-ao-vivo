@@ -7,7 +7,7 @@
 // Uso:
 //   node scripts/editar.mjs                       (modo interativo: lista os clipes e pergunta)
 //   node scripts/editar.mjs <clipe.mp4> [inicio] [fim]   (ex: 0:12 0:41)
-// Opções: --sem-gancho  --sem-cortar-pausas  --sem-zoom  --manter-jogo  --crop x,y,w,h  --gancho "texto"
+// Opções: --subgancho "texto"  --sem-gancho  --sem-cortar-pausas  --sem-zoom  --manter-jogo  --crop x,y,w,h  --gancho "texto"
 import {spawn, spawnSync} from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -160,8 +160,8 @@ async function claude(prompt, extra = [], cwd) {
 async function titulo(texto, dur, streamer) {
   const d = await claude(`Você é o editor do canal de cortes ${cfg.profileName || ''} (GTA VI, TikTok e YouTube Shorts). Fala do streamer ${streamer} num corte de ${dur.toFixed(0)} s:
 "${texto.slice(0, 2500)}"
-Crie: 1) um GANCHO curto para aparecer escrito na tela no começo do vídeo (máx. 6 palavras, curiosidade/choque, PT-BR, sem emoji); 2) um título de post que COMECE com o nome do streamer em maiúsculas (ex: "${streamer.toUpperCase()} ..."), porque o nome dele ajuda muito na busca do YouTube (pode ter 1 emoji); 3) uma legenda de post com 3 hashtags, sendo uma delas #${streamer.replace(/[^a-z0-9]/gi, '')}.
-Responda SÓ o JSON: {"gancho": "...", "titulo": "...", "legenda": "..."}`);
+Crie: 1) um GANCHO, o título grande escrito na tela no começo do vídeo (máx. 6 palavras, curiosidade/choque, PT-BR, sem emoji, estilo "CHEGOU A HORA DA VERDADE"), e um SUBGANCHO, o subtítulo pequeno embaixo dele que dá contexto ou aumenta a curiosidade (máx. 5 palavras, ex: "1 BILHÃO DE DÓLARES"); 2) um título de post que COMECE com o nome do streamer em maiúsculas (ex: "${streamer.toUpperCase()} ..."), porque o nome dele ajuda muito na busca do YouTube (pode ter 1 emoji); 3) uma legenda de post com 3 hashtags, sendo uma delas #${streamer.replace(/[^a-z0-9]/gi, '')}.
+Responda SÓ o JSON: {"gancho": "...", "subgancho": "...", "titulo": "...", "legenda": "..."}`);
   return d || {};
 }
 async function acharCamera(src, W, H) {
@@ -188,7 +188,7 @@ const assTime = (t) => {
   t = Math.max(0, t);
   return `${Math.floor(t / 3600)}:${String(Math.floor((t % 3600) / 60)).padStart(2, '0')}:${(t % 60).toFixed(2).padStart(5, '0')}`;
 };
-function writeAss(file, ws0, durS, hook) {
+function writeAss(file, ws0, durS, hook, sub = '') {
   const ws = ws0
     .filter((w) => !/[\[\]]/.test(w.text))
     .map((w) => ({...w, text: w.text.replace(/[.,;:!?…"]+$/g, '').replace(/^["'“”«(¿¡-]+/g, '').toUpperCase()}))
@@ -217,8 +217,25 @@ function writeAss(file, ws0, durS, hook) {
     });
   });
   if (hook) {
-    const h = esc(hook).replace(/[\p{Extended_Pictographic}️‍]/gu, '').trim().toUpperCase();
-    lines.push(`Dialogue: 2,${assTime(0)},${assTime(Math.min(3.2, durS))},Gancho,,0,0,0,,{\\an8\\pos(540,70)\\fscx130\\fscy130\\t(0,180,\\fscx100\\fscy100)\\fad(0,250)}${h}`);
+    const limpa = (t) => esc(t).replace(/[\p{Extended_Pictographic}️‍]/gu, '').replace(/\s+/g, ' ').trim().toUpperCase();
+    const h = limpa(hook);
+    // quebra o título em 2 linhas equilibradas
+    const pal = h.split(' ');
+    let best = h, diff = 1e9;
+    for (let i = 1; i < pal.length; i++) {
+      const a = pal.slice(0, i).join(' '), b = pal.slice(i).join(' ');
+      const d = Math.abs(a.length - b.length);
+      if (d < diff) { diff = d; best = `${a}\\N${b}`; }
+    }
+    if (h.length <= 14) best = h;
+    const fim = assTime(Math.min(3.5, durS));
+    const Y = TOP + 260;
+    lines.push(`Dialogue: 2,${assTime(0)},${fim},Titulo,,0,0,0,,{\\an8\\pos(540,${Y})\\fscx118\\fscy118\\t(0,160,\\fscx100\\fscy100)\\fad(0,250)}${best}`);
+    const sg = sub ? limpa(sub) : '';
+    if (sg) {
+      const ySub = Y + (best.includes('\\N') ? 2 : 1) * 100 + 14;
+      lines.push(`Dialogue: 2,${assTime(0.12)},${fim},Sub,,0,0,0,,{\\an8\\pos(540,${ySub})\\fad(120,250)}${sg}`);
+    }
   }
   fs.writeFileSync(
     file,
@@ -230,8 +247,9 @@ WrapStyle: 0
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Cap,Arial Black,84,&H00FFFFFF,&H00FFFFFF,&H00000000,&H64000000,1,0,0,0,100,100,0,0,1,9,4,5,40,40,0,1
-Style: Gancho,Arial Black,70,&H00FFFFFF,&H00FFFFFF,&H00000000,&H96000000,1,0,0,0,100,100,0,0,1,8,5,8,60,60,0,1
+Style: Cap,Montserrat Black,88,&H00FFFFFF,&H00FFFFFF,&H00000000,&H64000000,1,0,0,0,100,100,0,0,1,10,4,5,40,40,0,1
+Style: Titulo,Montserrat Black,96,&H0000B8F5,&H0000B8F5,&H00000000,&H96000000,1,0,0,0,100,100,0,0,1,7,4,8,50,50,0,1
+Style: Sub,Montserrat ExtraBold,52,&H00FFFFFF,&H00FFFFFF,&H00000000,&H96000000,1,0,0,0,100,100,0,0,1,5,3,8,50,50,0,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -285,10 +303,10 @@ async function editar(clipe, inicio, fim) {
   }
   const texto = ws.map((w) => w.text).join(' ');
 
-  let meta = {gancho: typeof opt.gancho === 'string' ? opt.gancho : '', titulo: '', legenda: ''};
+  let meta = {gancho: typeof opt.gancho === 'string' ? opt.gancho : '', subgancho: typeof opt.subgancho === 'string' ? opt.subgancho : '', titulo: '', legenda: ''};
   if (texto && !opt['sem-gancho']) {
     log('🤖 Criando gancho e título…');
-    meta = {...(await titulo(texto, D, opt.streamer || lado.canal || canal)), ...(meta.gancho ? {gancho: meta.gancho} : {})};
+    meta = {...(await titulo(texto, D, opt.streamer || lado.canal || canal)), ...(meta.gancho ? {gancho: meta.gancho} : {}), ...(meta.subgancho ? {subgancho: meta.subgancho} : {})};
   }
 
   // pausas
@@ -357,7 +375,12 @@ async function editar(clipe, inicio, fim) {
 
   const grad = path.join(dir, 'degrade.png');
   await run('ffmpeg', ['-y', '-v', 'error', '-f', 'lavfi', '-i', 'color=c=black:s=1080x360', '-frames:v', '1', '-vf', "format=rgba,geq=r=0:g=0:b=0:a='245*(0.5+0.5*cos(PI*abs(Y-180)/180))'", grad]);
-  const nWords = writeAss(path.join(dir, 'legenda.ass'), wsNew, newD, opt['sem-gancho'] ? '' : meta.gancho || meta.titulo);
+  const nWords = writeAss(path.join(dir, 'legenda.ass'), wsNew, newD, opt['sem-gancho'] ? '' : meta.gancho || meta.titulo, opt['sem-gancho'] ? '' : meta.subgancho || '');
+  try {
+    const fd = new URL('../fonts/', import.meta.url);
+    fs.mkdirSync(path.join(dir, 'fonts'), {recursive: true});
+    for (const f of fs.readdirSync(fd)) if (f.endsWith('.ttf')) fs.copyFileSync(new URL(f, fd), path.join(dir, 'fonts', f));
+  } catch {}
   const sel = keep.map((k) => `between(t,${k.from.toFixed(3)},${k.to.toFixed(3)})`).join('+');
 
   const nome = path.parse(clipe).name.replace(/-BRUTO$/, '');
@@ -379,7 +402,7 @@ async function editar(clipe, inicio, fim) {
     f += `[st][1:v]overlay=0:${TOP - 180}:shortest=1[v1];[0:a]aselect='${sel}',asetpts=N/SR/TB[a]`;
     let last = 'v1';
     if (subs) {
-      f += `;[v1]ass=legenda.ass[v2]`;
+      f += `;[v1]ass=legenda.ass:fontsdir=fonts[v2]`;
       last = 'v2';
     }
     return ['-y', '-v', 'error', '-i', src, '-loop', '1', '-i', grad, '-filter_complex', f, '-map', `[${last}]`, '-map', '[a]', '-t', newD.toFixed(2),
@@ -392,7 +415,7 @@ async function editar(clipe, inicio, fim) {
     r = await run('ffmpeg', build(false), {cwd: dir});
   }
   if (!fs.existsSync(out)) throw new Error('não consegui montar o vídeo: ' + r.err.slice(-300));
-  fs.writeFileSync(out.replace(/\.mp4$/, '.txt'), [`Título: ${meta.titulo || ''}`, `Gancho: ${meta.gancho || ''}`, `Legenda: ${meta.legenda || ''}`, '', `Fala: ${texto}`].join('\n') + '\n');
+  fs.writeFileSync(out.replace(/\.mp4$/, '.txt'), [`Título: ${meta.titulo || ''}`, `Gancho: ${meta.gancho || ''}`, `Subtítulo: ${meta.subgancho || ''}`, `Legenda: ${meta.legenda || ''}`, '', `Fala: ${texto}`].join('\n') + '\n');
   fs.rmSync(dir, {recursive: true, force: true});
   process.stdout.write('\x07');
   log(`✅ Pronto em ${((Date.now() - t0) / 1000).toFixed(0)} s → ${out}`);
